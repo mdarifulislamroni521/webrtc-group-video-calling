@@ -1,5 +1,5 @@
 # webrtc-group-video-calling
-![Screenshot at Jul 13 20-27-22](https://github.com/mdarifulislamroni521/webrtc-group-video-calling/assets/93242561/a18466f3-8888-490c-8e59-fed7e7273eb1)
+![Screenshot at Jul 13 20-27-22](https://github.com/mdarifulislamroni521/webrtc-group-video-calling/assets/93242561/a18466f3-8888-490c-8e59-fed7e7273eb1) 
 ## Quick Overview
 
 ```sh
