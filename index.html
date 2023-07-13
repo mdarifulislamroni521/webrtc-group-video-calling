@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="./style.css" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
+    />
+    <title>Document</title>
+  </head>
+  <body>
+    <div id="streams_wrap">
+      <div
+        style="display: none"
+        id="local_video_stream_id"
+        class="video_stream_wrap"
+      >
+        <video
+          id="local_video_player"
+          class="video_player_wrap"
+          muted
+          autoplay
+        ></video>
+        <div style="display: none" class="absolute_wrap">
+          <h3 class="user_name_wrap_offvid"></h3>
+          <h4>Video Disable</h4>
+        </div>
+        <div class="bottom_absolute_wrap">
+          <h5 class="user_name_wrap"></h5>
+          <button onclick="handleEndCall()" class="btn end_call_button">
+            <span style="margin: 3px" class="material-symbols-outlined">
+              call_end
+            </span>
+            End call
+          </button>
+          <button onclick="handleMuteUnMute()" class="btn">
+            <span id="audio-control" class="material-symbols-outlined"
+              >mic_off</span
+            >
+          </button>
+          <button onclick="handleVideoOnOff()" class="btn">
+            <span id="video-control" class="material-symbols-outlined">
+              desktop_windows
+            </span>
+          </button>
+          <button onclick="handleScreenShareOnOff()" class="btn">
+            <span id="control-screen-share" class="material-symbols-outlined"
+              >stop_screen_share</span
+            >
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- scripts -->
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script>
+      const url = window.location.href;
+      console.log(url);
+      let socket = null;
+      let localUserName = null;
+      let localStream = null;
+      let localScreenShare = null;
+      let localVideoStreamType = "video";
+      let remoteStreams = {};
+
+      //   peer stun config
+      var peerConnectionConfig = {
+        iceServers: [
+          { urls: "stun:stun.stunprotocol.org:3478" },
+          { urls: "stun:stun.l.google.com:19302" },
+        ],
+      };
+
+      // specify no audio for user media
+      var constraints = {
+        video: {
+          width: { max: 1920 },
+          height: { max: 1080 },
+          frameRate: { max: 30 },
+        },
+        audio: true,
+      };
+
+      //   initial state get info from client
+      const urlParams = new URLSearchParams(window.location.search);
+      const getDisplayName =
+        urlParams.get("displayName") || prompt("Enter your name", "");
+      localUserName = `${getDisplayName}(Me)`;
+      if (getDisplayName && getDisplayName.trim().length > 0) {
+        navigator.mediaDevices
+          .getUserMedia(constraints)
+          .then(async (stream) => {
+            localStream = stream;
+            const audioTrack = stream.getAudioTracks()[0];
+            audioTrack.enabled = false;
+            const local_vid_player =
+              document.getElementById("local_video_player");
+            const local_video_stream_id = document.getElementById(
+              "local_video_stream_id"
+            );
+            local_vid_player.srcObject = stream;
+            local_video_stream_id.style.display = "inherit";
+            local_video_stream_id
+              .querySelector(".bottom_absolute_wrap")
+              .querySelector(".user_name_wrap").innerHTML = getDisplayName;
+            local_video_stream_id.querySelector(
+              ".absolute_wrap"
+            ).childNodes[0].innerHTML = getDisplayName;
+            local_video_stream_id
+              .querySelector(".absolute_wrap")
+              .querySelector(".user_name_wrap_offvid").innerHTML =
+              getDisplayName;
+            handleSockets(getDisplayName);
+          });
+      } else {
+        alert("Display Name not found!");
+      }
+
+      // if iceCandidate event
+      function gotIceCandidate(event, connSocketId) {
+        if (event.candidate != null) {
+          socket.emit("got-iceCandiate", {
+            ice: event.candidate,
+            to_connSocketId: connSocketId,
+          });
+        }
+      }
+      //   if receive track from new connection
+      function gotRemoteStream(event, connSocketId) {
+        if (event.track.kind === "video") {
+          // create new video html element
+          var vidElement = document.createElement("video");
+          vidElement.setAttribute("autoplay", "");
+          vidElement.setAttribute("muted", "");
+          vidElement.setAttribute("class", "video_player_wrap");
+          vidElement.srcObject = event.streams[0];
+          //  remote div container
+          var vidContainer = document.createElement("div");
+          vidContainer.setAttribute("id", `remoteVideo_${connSocketId}`);
+          vidContainer.setAttribute("class", "video_stream_wrap");
+          vidContainer.appendChild(vidElement);
+          //   bottom control div
+          let BottomabsoluteDiv = document.createElement("div");
+          BottomabsoluteDiv.setAttribute("class", "bottom_absolute_wrap");
+          // label append
+          let labelElement = document.createElement("h5");
+          labelElement.setAttribute("class", "user_name_wrap");
+          labelElement.innerHTML = remoteStreams[connSocketId].displayName;
+          BottomabsoluteDiv.appendChild(labelElement);
+
+          // mic button append
+          const MicButton = document.createElement("button");
+          MicButton.setAttribute("class", "btn");
+          MicButton.style.cursor = "no-drop";
+          const MicIcon = document.createElement("span");
+          MicIcon.setAttribute("class", "material-symbols-outlined");
+
+          MicIcon.innerHTML = remoteStreams[connSocketId].mic
+            ? "mic"
+            : "mic_off";
+          MicButton.append(MicIcon);
+          BottomabsoluteDiv.append(MicButton);
+          // screen_status
+          const absolute_wrap = document.createElement("div");
+          absolute_wrap.setAttribute("class", "absolute_wrap");
+
+          // video disabled screen div
+          const absolute_wrap_h3 = document.createElement("h3");
+          absolute_wrap_h3.innerHTML = remoteStreams[connSocketId].displayName;
+          absolute_wrap.appendChild(absolute_wrap_h3);
+          const absolute_wrap_h4 = document.createElement("h4");
+          absolute_wrap.appendChild(absolute_wrap_h4);
+
+          vidContainer.appendChild(absolute_wrap);
+          vidContainer.appendChild(BottomabsoluteDiv);
+          //   append a new remote video in streams_wrap
+          document.getElementById("streams_wrap").appendChild(vidContainer);
+        } else if (event.track.kind === "audio") {
+          // if audio track receive
+          let vidContainer = document.createElement("div");
+          let AudioElement = document.createElement("audio");
+          AudioElement.setAttribute("autoplay", "");
+          AudioElement.setAttribute("controls", "");
+          AudioElement.setAttribute("class", `qremoteAudio_${connSocketId}`);
+          AudioElement.style.display = "none";
+          AudioElement.srcObject = null;
+          AudioElement.srcObject = event.streams[1];
+          AudioElement.load();
+          vidContainer.appendChild(AudioElement);
+        }
+      }
+
+      //   handle video screen enable and disable
+      async function disenAbsoluteWrap(connSocketId, status = false) {
+        let local_absolute_wrap = null;
+        if (connSocketId.trim().length > 0) {
+          local_absolute_wrap = await document
+            .querySelector(`#remoteVideo_${connSocketId}`)
+            .querySelector(".absolute_wrap");
+          local_absolute_wrap.childNodes[0].innerHTML =
+            remoteStreams[connSocketId].displayName;
+          local_absolute_wrap.childNodes[0].innerHTML =
+            localVideoStreamType === "screen"
+              ? "Screen Sharing"
+              : "Video Disabled";
+          if (status) {
+            local_absolute_wrap.style.display = "flex";
+          } else {
+            local_absolute_wrap.style.display = "none";
+          }
+        } else {
+          local_absolute_wrap = await document
+            .querySelector("#local_video_stream_id")
+            .querySelector(".absolute_wrap");
+          local_absolute_wrap.childNodes[0].innerHTML =
+            localVideoStreamType === "screen"
+              ? "Screen Sharing"
+              : "Video Disabled";
+          if (status) {
+            local_absolute_wrap.style.display = "flex";
+          } else {
+            local_absolute_wrap.style.display = "none";
+          }
+          if (localVideoStreamType !== "screen") {
+            for (let connSocketId of Object.keys(remoteStreams)) {
+              socket.emit("video_changed", {
+                to_connSocketId: connSocketId,
+                status,
+              });
+            }
+          }
+        }
+      }
+
+      // if mic on off notify to all connected peers
+      async function MicChangedUpdated(connSocketId, status = false) {
+        const remoteMicElement = await document
+          .querySelector(`#remoteVideo_${connSocketId}`)
+          .querySelector(".bottom_absolute_wrap")
+          .querySelector(".btn span.material-symbols-outlined");
+        if (status) {
+          remoteMicElement.innerHTML = "mic";
+        } else {
+          remoteMicElement.innerHTML = "mic_off";
+        }
+      }
+
+      //   initial new peer coonection when new user connected
+      async function setUpPeer(
+        connSocketId,
+        displayName,
+        initCall = false,
+        mic = false
+      ) {
+        remoteStreams[connSocketId] = {
+          displayName: displayName,
+          peerConn: new RTCPeerConnection(peerConnectionConfig),
+          show: false,
+          mic,
+        };
+        remoteStreams[connSocketId].peerConn.onicecandidate = (event) => {
+          gotIceCandidate(event, connSocketId);
+        };
+
+        remoteStreams[connSocketId].peerConn.ontrack = (event) =>
+          gotRemoteStream(event, connSocketId);
+
+        remoteStreams[connSocketId].peerConn.addStream(localStream);
+
+        if (initCall) {
+          remoteStreams[connSocketId].peerConn
+            .createOffer()
+            .then((description) => {
+              remoteStreams[connSocketId].peerConn
+                .setLocalDescription(description)
+                .then(() => {
+                  socket.emit("save-offer:on-yoyr-remote", {
+                    to_connSocketId: connSocketId,
+                    offer:
+                      remoteStreams[connSocketId].peerConn.localDescription,
+                  });
+                });
+            })
+            .catch((error) => {
+              console.log(error);
+            });
+        }
+      }
+
+      // handle all socket.io emit
+      async function handleSockets(displayName) {
+        //
+        socket = await io(`${window.location.href}`, {
+          query: {
+            desplayName: displayName,
+          },
+        });
+        socket.on("new-user:join", async (data) => {
+          const { connSocketId, displayName, mic } = data;
+          setUpPeer(connSocketId, displayName, false, mic);
+          const audioTrack = await localStream.getAudioTracks()[0];
+          socket.emit("new-user:intial-done", {
+            to_connSocketId: connSocketId,
+            mic: audioTrack.enabled,
+          });
+        });
+
+        socket.on("got-iceCandiate", (data) => {
+          const { ice, from_connSocketId } = data;
+          remoteStreams[from_connSocketId].peerConn.addIceCandidate(
+            new RTCIceCandidate(ice)
+          );
+        });
+
+        socket.on("you:intial-done", (data) => {
+          const { from_connSocketId, displayName, mic } = data;
+          setUpPeer(from_connSocketId, displayName, true, mic);
+        });
+
+        socket.on("save-offer:on-yoyr-remote", (data) => {
+          const { from_connSocketId, offer } = data;
+          remoteStreams[from_connSocketId].peerConn
+            .setRemoteDescription(new RTCSessionDescription(offer))
+            .then(() => {
+              remoteStreams[from_connSocketId].peerConn
+                .createAnswer()
+                .then((ans) => {
+                  remoteStreams[from_connSocketId].peerConn
+                    .setLocalDescription(ans)
+                    .then(() => {
+                      socket.emit("save-ans:your-remote", {
+                        to_connSocketId: from_connSocketId,
+                        ans: remoteStreams[from_connSocketId].peerConn
+                          .localDescription,
+                      });
+                    });
+                });
+            });
+        });
+
+        socket.on("save-ans:your-remote", (data) => {
+          const { from_connSocketId, ans } = data;
+          remoteStreams[from_connSocketId].peerConn.setRemoteDescription(
+            new RTCSessionDescription(ans)
+          );
+        });
+
+        socket.on("video_changed", (data) => {
+          const { from_connSocketId, status } = data;
+          disenAbsoluteWrap(from_connSocketId, status);
+        });
+        socket.on("mic_update", (data) => {
+          const { from_connSocketId, status } = data;
+          MicChangedUpdated(from_connSocketId, status);
+        });
+
+        socket.on("user:disconnected", async ({ from_connSocketId }) => {
+          document
+            .getElementById("streams_wrap")
+            .removeChild(
+              document.getElementById(`remoteVideo_${from_connSocketId}`)
+            );
+          await remoteStreams[from_connSocketId].peerConn.close();
+          delete remoteStreams[from_connSocketId];
+          console.log("deleted user ", from_connSocketId);
+        });
+      }
+
+      //   handle buttons click event
+      async function handleEndCall() {
+        socket.disconnect();
+        for (let connSocketId of Object.keys(remoteStreams)) {
+          remoteStreams[connSocketId].peerConn.close();
+          document
+            .getElementById("streams_wrap")
+            .removeChild(
+              document.getElementById(`remoteVideo_${connSocketId}`)
+            );
+          delete remoteStreams[connSocketId];
+        }
+        window.location.reload();
+      }
+
+      async function handleMuteUnMute() {
+        if (localStream) {
+          let audioTrack = await localStream.getAudioTracks()[0];
+          if (audioTrack) {
+            audioTrack.enabled = !audioTrack.enabled;
+            const audioControldiv = document.getElementById("audio-control");
+            if (audioTrack.enabled) {
+              audioControldiv.innerHTML = "mic";
+            } else {
+              audioControldiv.innerHTML = "mic_off";
+            }
+
+            for (let connSocketId of Object.keys(remoteStreams)) {
+              socket.emit("mic_update", {
+                to_connSocketId: connSocketId,
+                status: audioTrack.enabled,
+              });
+            }
+            return;
+          } else {
+            alert("aduio track not found");
+          }
+        } else {
+          alert("local stream not found");
+        }
+      }
+
+      async function handleVideoOnOff() {
+        const videoTrack = localStream
+          .getTracks()
+          .find((track) => track.kind === "video");
+        videoTrack.enabled = !videoTrack.enabled;
+
+        if (
+          localVideoStreamType === "video" ||
+          localVideoStreamType === "none"
+        ) {
+          const videoControlDiv = document.getElementById("video-control");
+          if (videoTrack.enabled) {
+            localVideoStreamType = "video";
+            videoControlDiv.innerHTML = "desktop_windows";
+            disenAbsoluteWrap("");
+          } else {
+            localVideoStreamType = "none";
+            videoControlDiv.innerHTML = "desktop_access_disabled";
+            disenAbsoluteWrap("", true);
+          }
+        } else if (localVideoStreamType === "screen") {
+          if (localScreenShare) {
+            localScreenShare.getTracks().forEach((track) => track.stop());
+          }
+          const videoTrack = localStream
+            .getTracks()
+            .find((track) => track.kind === "video");
+          videoTrack.enabled = true;
+          disenAbsoluteWrap("", false);
+          const ScreenShareIconControl = document.getElementById(
+            "control-screen-share"
+          );
+          for (let connSocketId of Object.keys(remoteStreams)) {
+            const preVideoTrack = remoteStreams[connSocketId].peerConn
+              .getSenders()
+              .find((streamTrack) => streamTrack.track.kind === "video");
+            if (preVideoTrack) {
+              preVideoTrack.track.enabled = false;
+              preVideoTrack.replaceTrack(videoTrack);
+            } else {
+              alert("faild to update Screen Share");
+            }
+          }
+          ScreenShareIconControl.innerHTML = "stop_screen_share";
+          localVideoStreamType = "video";
+        }
+      }
+
+      async function handleScreenShareOnOff() {
+        if (localVideoStreamType !== "screen") {
+          navigator.mediaDevices
+            .getDisplayMedia(constraints)
+            .then((screen) => {
+              localScreenShare = screen;
+              const videoScreenShareTrack = screen
+                .getTracks()
+                .find((track) => track.kind === "video");
+              const ScreenShareIconControl = document.getElementById(
+                "control-screen-share"
+              );
+              const videoControlDiv = document.getElementById("video-control");
+              const videoControlChildSpan = videoControlDiv.childNodes[0];
+              for (let connSocketId of Object.keys(remoteStreams)) {
+                const preVideoTrack = remoteStreams[connSocketId].peerConn
+                  .getSenders()
+                  .find((streamTrack) => streamTrack.track.kind === "video");
+                if (preVideoTrack) {
+                  preVideoTrack.track.enabled = false;
+                  preVideoTrack.replaceTrack(videoScreenShareTrack);
+                } else {
+                  alert("faild to update Screen Share");
+                }
+              }
+              ScreenShareIconControl.innerHTML = "screen_share";
+              localVideoStreamType = "screen";
+              videoControlChildSpan.innerHTML = "desktop_access_disabled";
+              disenAbsoluteWrap("", true);
+            })
+            .catch((err) => {
+              handleVideoOnOff();
+            });
+        } else {
+          handleVideoOnOff();
+        }
+      }
+    </script>
+  </body>
+</html>
